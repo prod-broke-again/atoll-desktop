@@ -2,17 +2,30 @@ import type { IWidget } from './contract';
 import type { LauncherMessage, LauncherGroup } from '../types/ipc';
 import { FolderWidget } from './folder';
 import { DockWidget } from './dock';
+import { DraggableWidgetManager } from './draggable';
 
 export class LauncherWidgetManager implements IWidget {
   readonly id = 'launcher-manager';
   private container: HTMLElement | null = null;
+  private foldersEl: HTMLElement | null = null;
+  private foldersItemsEl: HTMLElement | null = null;
   private dockWidget: DockWidget | null = null;
   private folderWidgets = new Map<string, FolderWidget>();
 
   mount(container: HTMLElement): void {
     this.container = container;
 
-    // Create and mount pinned dock (placed next to folder column under system widget)
+    // 1. Folders container widget (draggable column placed next to dock under system widget)
+    const foldersEl = document.createElement('div');
+    foldersEl.className = 'widget folders-widget';
+    foldersEl.innerHTML = '<div class="folders-items"></div>';
+    foldersEl.style.display = 'none';
+    this.foldersEl = foldersEl;
+    this.foldersItemsEl = foldersEl.querySelector('.folders-items');
+    container.appendChild(foldersEl);
+    DraggableWidgetManager.makeDraggable('folders', foldersEl, () => ({ x: 48, y: 280 }));
+
+    // 2. Dock widget (placed next to folder column under system widget)
     this.dockWidget = new DockWidget(() => ({
       x: 148,
       y: 280,
@@ -42,20 +55,31 @@ export class LauncherWidgetManager implements IWidget {
         }
       }
 
+      if (this.foldersEl) {
+        this.foldersEl.style.display = msg.groups.length > 0 ? '' : 'none';
+      }
+
+      if (this.foldersItemsEl) {
+        if (msg.groups.length > 8) {
+          this.foldersItemsEl.classList.add('is-compact');
+        } else {
+          this.foldersItemsEl.classList.remove('is-compact');
+        }
+      }
+
       // Update existing or mount new folders
-      msg.groups.forEach((group: LauncherGroup, index: number) => {
+      msg.groups.forEach((group: LauncherGroup) => {
         const existing = this.folderWidgets.get(group.id);
         if (existing) {
           existing.update(group);
-        } else {
-          const folder = new FolderWidget(group, () => ({
-            x: 48,
-            y: 280 + index * 110,
-          }));
-          folder.mount(this.container!);
+        } else if (this.foldersItemsEl && this.container) {
+          const folder = new FolderWidget(group, undefined, false);
+          folder.mount(this.foldersItemsEl, this.container);
           this.folderWidgets.set(group.id, folder);
         }
       });
+
+      DraggableWidgetManager.refresh('folders');
     }
   }
 
@@ -82,6 +106,10 @@ export class LauncherWidgetManager implements IWidget {
       w.destroy();
     }
     this.folderWidgets.clear();
+    DraggableWidgetManager.unregister('folders');
+    this.foldersEl?.remove();
+    this.foldersEl = null;
+    this.foldersItemsEl = null;
     this.container = null;
   }
 }

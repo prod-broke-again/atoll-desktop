@@ -21,27 +21,29 @@ export class FolderWidget implements IWidget {
   private group: LauncherGroup;
   private element: HTMLElement | null = null;
   private overlayContainer: HTMLElement | null = null;
-  private defaultPosFn: () => WidgetPosition;
+  private defaultPosFn?: () => WidgetPosition;
+  private standalone: boolean;
 
   private panelEl: HTMLElement | null = null;
   private previewGridEl: HTMLElement | null = null;
   private titleEl: HTMLElement | null = null;
   private removeClickListener: (() => void) | null = null;
 
-  constructor(group: LauncherGroup, defaultPosFn?: () => WidgetPosition) {
+  constructor(group: LauncherGroup, defaultPosFn?: () => WidgetPosition, standalone = true) {
     this.group = group;
     this.id = `folder_${group.id}`;
-    this.defaultPosFn = defaultPosFn ?? (() => ({ x: 48, y: 280 }));
+    this.defaultPosFn = defaultPosFn;
+    this.standalone = standalone;
   }
 
-  mount(container: HTMLElement): void {
-    this.overlayContainer = container;
+  mount(container: HTMLElement, overlayContainer?: HTMLElement): void {
+    this.overlayContainer = overlayContainer ?? container;
 
     const el = document.createElement('div');
-    el.className = 'widget folder-tile-widget';
+    el.className = this.standalone ? 'widget folder-tile-widget' : 'folder-tile-widget';
     el.setAttribute('data-group-id', this.group.id);
     el.innerHTML = `
-      <div class="folder-tile" data-name="${esc(this.group.name)}">
+      <div class="folder-tile" data-action="folder" data-name="${esc(this.group.name)}">
         <div class="folder-preview-grid"></div>
       </div>
       <div class="folder-tile-title"></div>
@@ -70,7 +72,9 @@ export class FolderWidget implements IWidget {
       }
     });
 
-    DraggableWidgetManager.makeDraggable(this.id, el, this.defaultPosFn);
+    if (this.standalone && this.defaultPosFn) {
+      DraggableWidgetManager.makeDraggable(this.id, el, this.defaultPosFn);
+    }
     this.renderTile();
   }
 
@@ -95,7 +99,9 @@ export class FolderWidget implements IWidget {
     this.closePanel();
     this.removeClickListener?.();
     this.removeClickListener = null;
-    DraggableWidgetManager.unregister(this.id);
+    if (this.standalone) {
+      DraggableWidgetManager.unregister(this.id);
+    }
     this.element?.remove();
     this.element = null;
     this.previewGridEl = null;

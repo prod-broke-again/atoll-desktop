@@ -60,6 +60,7 @@ public sealed class WallpaperForm : Form
     private Point _screenOrigin = Point.Empty;
     private string? _mappedPinsDir;
     private readonly WallpaperMediaHost _wallpaperMedia = new();
+    private readonly System.Windows.Forms.Timer _displayChangeDebounceTimer = new() { Interval = 750 };
 
     public WallpaperForm(
         IConfigManager configManager,
@@ -93,6 +94,8 @@ public sealed class WallpaperForm : Form
         _logger = logger;
 
         _taskbarCreatedMsg = RegisterWindowMessage("TaskbarCreated");
+        _displayChangeDebounceTimer.Tick += OnDisplayChangeDebounced;
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -979,6 +982,45 @@ public sealed class WallpaperForm : Form
         AttachToDesktop();
     }
 
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        if (_isShuttingDown || IsDisposed) return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(() => OnDisplaySettingsChanged(sender, e)); } catch { }
+            return;
+        }
+
+        _logger.LogInformation("Display settings change detected. Debouncing 750ms...");
+        _displayChangeDebounceTimer.Stop();
+        _displayChangeDebounceTimer.Start();
+    }
+
+    private void OnDisplayChangeDebounced(object? sender, EventArgs e)
+    {
+        _displayChangeDebounceTimer.Stop();
+        if (_isShuttingDown || IsDisposed || !IsHandleCreated) return;
+
+        _logger.LogInformation("Debounce timer elapsed. Re-evaluating desktop parent and primary bounds...");
+
+        var currentParent = GetParent(Handle);
+        var targetParent = _desktopManager.LocateWallpaperParent();
+        if (targetParent == IntPtr.Zero)
+        {
+            targetParent = _desktopManager.FindExistingParent();
+        }
+
+        if (currentParent == IntPtr.Zero || !IsWindow(currentParent) || currentParent != targetParent || !_isAttached)
+        {
+            _logger.LogInformation("Wallpaper parent invalid or shifted after display configuration. Reattaching (old={Old}, new={New}).", currentParent, targetParent);
+            _isAttached = false;
+            _desktopManager.AttachWindow(Handle);
+            _isAttached = true;
+        }
+
+        ApplyPrimaryBounds();
+    }
+
     /// <summary>
     /// Positions the window over the primary monitor only. After SetParent the coordinates are
     /// relative to the WorkerW/Progman parent, whose origin is the virtual-screen top-left.
@@ -993,18 +1035,36 @@ public sealed class WallpaperForm : Form
         var y = primary.Y;
         if (parent != IntPtr.Zero && GetWindowRect(parent, out var pr))
         {
-            x -= pr.Left;
-            y -= pr.Top;
+            x = primary.X - pr.Left;
+            y = primary.Y - pr.Top;
         }
 
         const uint SWP_NOZORDER = 0x0004;
         const uint SWP_NOACTIVATE = 0x0010;
-        _ = SetWindowPos(Handle, IntPtr.Zero, x, y, primary.Width, primary.Height, SWP_NOZORDER | SWP_NOACTIVATE);
-        _logger.LogInformation("Wallpaper bounds set to primary monitor {Bounds} (offset in parent {X},{Y}).", primary, x, y);
+        const uint SWP_SHOWWINDOW = 0x0040;
+        const uint SWP_FRAMECHANGED = 0x0020;
+
+        _ = SetWindowPos(Handle, IntPtr.Zero, x, y, primary.Width, primary.Height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+
+        Width = primary.Width;
+        Height = primary.Height;
+        if (_webView != null)
+        {
+            _webView.Size = new Size(primary.Width, primary.Height);
+        }
+
+        _logger.LogInformation("Wallpaper bounds set to primary monitor {Bounds} (offset in parent {X},{Y}, size {Width}x{Height}).", primary, x, y, primary.Width, primary.Height);
     }
 
     private bool IsDesktopAt(int screenX, int screenY)
     {
+        var primary = Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen;
+        if (screenX < _screenOrigin.X || screenX > _screenOrigin.X + primary.Width ||
+            screenY < _screenOrigin.Y || screenY > _screenOrigin.Y + primary.Height)
+        {
+            return false;
+        }
+
         var hwnd = WindowFromPoint(new POINT { X = screenX, Y = screenY });
         if (hwnd == IntPtr.Zero) return false;
         if (hwnd == Handle) return true;
@@ -1041,9 +1101,22 @@ public sealed class WallpaperForm : Form
     // the web side divides them by devicePixelRatio.
     private void OnMouseMoved(object? sender, MouseCoordinates coords)
     {
-        // overDesktop lets the page drop widget hover while the pointer is over an app window or the
-        // taskbar panel; the position still flows so cursor-driven background effects keep working.
-        SendWebMessage(new { type = "mouse", x = coords.X - _screenOrigin.X, y = coords.Y - _screenOrigin.Y, overDesktop = IsDesktopAt(coords.X, coords.Y) });
+        var primary = Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen;
+        var isOutside = coords.X < _screenOrigin.X || coords.X > _screenOrigin.X + primary.Width ||
+                        coords.Y < _screenOrigin.Y || coords.Y > _screenOrigin.Y + primary.Height;
+
+        var overDesktop = !isOutside && IsDesktopAt(coords.X, coords.Y);
+
+        var clampedX = Math.Clamp(coords.X, _screenOrigin.X, _screenOrigin.X + primary.Width);
+        var clampedY = Math.Clamp(coords.Y, _screenOrigin.Y, _screenOrigin.Y + primary.Height);
+
+        SendWebMessage(new
+        {
+            type = "mouse",
+            x = clampedX - _screenOrigin.X,
+            y = clampedY - _screenOrigin.Y,
+            overDesktop
+        });
     }
 
     private void OnMouseDown(object? sender, MouseButtonCoordinates coords)
@@ -1051,6 +1124,13 @@ public sealed class WallpaperForm : Form
         if (IsHandleCreated && InvokeRequired)
         {
             try { BeginInvoke(() => OnMouseDown(sender, coords)); } catch { }
+            return;
+        }
+
+        var primary = Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen;
+        if (coords.X < _screenOrigin.X || coords.X > _screenOrigin.X + primary.Width ||
+            coords.Y < _screenOrigin.Y || coords.Y > _screenOrigin.Y + primary.Height)
+        {
             return;
         }
 
@@ -1067,12 +1147,32 @@ public sealed class WallpaperForm : Form
             return;
         }
 
+        var primary = Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen;
+        if (coords.X < _screenOrigin.X || coords.X > _screenOrigin.X + primary.Width ||
+            coords.Y < _screenOrigin.Y || coords.Y > _screenOrigin.Y + primary.Height)
+        {
+            return;
+        }
+
         if (!IsDesktopAt(coords.X, coords.Y)) return;
         SendWebMessage(new { type = "wheel", x = coords.X - _screenOrigin.X, y = coords.Y - _screenOrigin.Y, delta = coords.Delta });
     }
 
     private void OnMouseUp(object? sender, MouseButtonCoordinates coords)
     {
+        if (IsHandleCreated && InvokeRequired)
+        {
+            try { BeginInvoke(() => OnMouseUp(sender, coords)); } catch { }
+            return;
+        }
+
+        var primary = Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen;
+        if (coords.X < _screenOrigin.X || coords.X > _screenOrigin.X + primary.Width ||
+            coords.Y < _screenOrigin.Y || coords.Y > _screenOrigin.Y + primary.Height)
+        {
+            return;
+        }
+
         if (!IsDesktopAt(coords.X, coords.Y)) return;
         SendWebMessage(new { type = "mouse_up", x = coords.X - _screenOrigin.X, y = coords.Y - _screenOrigin.Y, button = coords.Button });
     }
@@ -1136,8 +1236,8 @@ public sealed class WallpaperForm : Form
 
         if (m.Msg == WM_DISPLAYCHANGE || m.Msg == WM_DPICHANGED)
         {
-            _logger.LogInformation("Display resolution or DPI changed. Updating window bounds to virtual screen...");
-            ApplyPrimaryBounds();
+            _logger.LogInformation("Display resolution or DPI message received. Debouncing bounds update...");
+            OnDisplaySettingsChanged(this, EventArgs.Empty);
             return;
         }
 
@@ -1180,6 +1280,9 @@ public sealed class WallpaperForm : Form
         }
 
         _logger.LogWarning("WallpaperForm.OnFormClosing called! CloseReason: {CloseReason}. Stack: {StackTrace}", e.CloseReason, Environment.StackTrace);
+        try { Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged; } catch { }
+        _displayChangeDebounceTimer.Stop();
+        _displayChangeDebounceTimer.Dispose();
         _mouseHook.Dispose();
 
         _ = UnregisterHotKey(Handle, HOTKEY_ROTATE_ID);
@@ -1211,6 +1314,10 @@ public sealed class WallpaperForm : Form
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
     private static extern IntPtr WindowFromPoint(POINT point);
