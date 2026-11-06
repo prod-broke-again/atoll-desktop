@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Taskbar Spike</title>
+  <link rel="stylesheet" href="dock.css" />
+</head>
+<body class="v-dock no-glass">
+  <!-- ===== Вариант A: три острова ===== -->
+  <div id="dock-ui">
+    <div id="island-desks" class="island glass" hidden>
+      <div id="desks" class="desks"></div>
+    </div>
+
+    <nav id="island-dock" class="island glass dock" aria-label="Панель задач">
+      <button class="dock-item btn-reset" data-act="start" type="button" title="Пуск" aria-label="Пуск" id="dock-start">
+        <span class="tile-glyph" style="background:var(--accent);color:var(--on-accent)">
+          <svg class="ic-fill" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="2"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="2"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="2"/><rect x="13" y="13" width="7.5" height="7.5" rx="2"/></svg>
+        </span>
+      </button>
+      <button class="dock-item btn-reset" data-act="search" type="button" title="Поиск" aria-label="Поиск" id="dock-search">
+        <span class="tile-glyph" style="background:rgba(255,255,255,.10)">
+          <svg class="ic" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        </span>
+      </button>
+      <div class="dock-sep"></div>
+      <div id="apps-dock" class="apps-host"></div>
+    </nav>
+
+    <div id="island-sys" class="island glass">
+      <button class="tool btn-reset js-trayq" data-act="tray-toggle" type="button" title="Скрытые значки" aria-label="Скрытые значки">
+        <svg class="ic" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+      </button>
+      <div id="tray-dock" class="tray-host"></div>
+      <button class="tool btn-reset js-lang" data-act="lang" type="button" title="Переключить раскладку" style="font-size:12px;font-weight:600;letter-spacing:.02em;min-width:52px">···</button>
+      <button class="tool btn-reset js-quick" data-act="quick" type="button" title="Сеть и звук" style="gap:10px;padding:0 12px"><span class="ico js-net"></span><span class="ico js-vol"></span></button>
+      <button class="tool btn-reset js-clock" data-act="clock" type="button" title="Календарь и уведомления" style="gap:10px;padding:0 10px 0 12px">
+        <span class="clock-col"><span class="t js-time">00:00</span><span class="d muted js-date" data-fmt="dock">&nbsp;</span></span>
+        <span class="ico js-bell"></span>
+      </button>
+      <button class="tool btn-reset" data-act="desktop-toggle" type="button" title="Свернуть все окна" aria-label="Свернуть все окна">
+        <svg class="ic" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="11.5" rx="2"/><path d="M7 13.5h10"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ===== Вариант B: Win10 ===== -->
+  <nav id="bar-ui" class="bar" aria-label="Панель задач (полоса)" hidden>
+    <button class="bar-btn btn-reset" data-act="start" type="button" aria-label="Пуск" title="Пуск" id="bar-start" style="min-width:48px">
+      <svg class="ic-fill" width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="2.5" width="9" height="9"/><rect x="12.5" y="2.5" width="9" height="9"/><rect x="2.5" y="12.5" width="9" height="9"/><rect x="12.5" y="12.5" width="9" height="9"/></svg>
+    </button>
+    <label class="bar-search">
+      <svg class="ic muted" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+      <input id="bar-search" type="text" placeholder="Введите здесь текст для поиска" aria-label="Поиск" autocomplete="off" spellcheck="false">
+    </label>
+    <button class="bar-btn btn-reset" data-act="desks-view" type="button" aria-label="Представление задач" title="Представление задач">
+      <svg class="ic" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="11"/><path d="M19 9v11H8"/></svg>
+    </button>
+    <div id="apps-bar" class="apps-host"></div>
+    <span class="grow"></span>
+    <button class="bar-btn bar-small btn-reset js-trayq" data-act="tray-toggle" type="button" aria-label="Отображать скрытые значки" title="Отображать скрытые значки">
+      <svg class="ic" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+    </button>
+    <div id="tray-bar" class="tray-host"></div>
+    <button class="bar-btn bar-small btn-reset js-quick" data-act="quick" type="button" title="Сеть и звук" style="gap:9px;padding:0 10px"><span class="ico js-net"></span><span class="ico js-vol"></span></button>
+    <button class="bar-btn bar-small btn-reset js-lang" data-act="lang" type="button" title="Переключить раскладку" style="font-size:12px;padding:0 8px">···</button>
+    <span class="bar-dnd js-bell-bar" title="Не беспокоить включено" hidden></span>
+    <button class="bar-btn bar-clock btn-reset js-clock" data-act="clock" type="button" title="Дата, время и уведомления">
+      <span class="js-time">00:00</span><span class="js-date" data-fmt="bar">&nbsp;</span>
+    </button>
+    <button class="bar-btn bar-show btn-reset" data-act="desktop-toggle" type="button" aria-label="Свернуть все окна" title="Свернуть все окна"></button>
+  </nav>
+
+  <script src="dock.js"></script>
+</body>
+</html>

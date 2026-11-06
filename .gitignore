@@ -1,0 +1,46 @@
+# Build and output directories
+bin/
+obj/
+dist/
+publish/
+node_modules/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Logs and temps
+*.log
+TestResults/
+*.tmp
+LiveWallpaperSpike_UserData/
+.DS_Store
+Thumbs.db
+publish-new/
+.old-assets/
+temp_chrome_profile/
+tmp_audit/
+
+# Python cache & databases
+__pycache__/
+*.pyc
+*.pyo
+*.sqlite
+*.sqlite3
+*.db
+pins_catalog.sqlite
+pins.db
+
+# Secrets, sessions and credentials
+.env
+*.env
+*.env.local
+*.session
+*.session-journal
+pinterest_cookie.txt
+.pinterest_chrome_profile/
+
+# Documentation and research artifacts with sensitive notes
+docs/
+tmp_shots/

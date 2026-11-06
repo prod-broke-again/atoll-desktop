@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <!-- WinRT: Bluetooth radio and mobile hotspot tiles (HANDOFF 8.3) -->
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>TaskbarSpike</RootNamespace>
+    <AssemblyName>TaskbarSpike</AssemblyName>
+    <!-- Research spike: not held to production analyzer rules. -->
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="JumpList" Version="2026.10.10" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="$(NetCoreTargetingPackRoot)\Microsoft.WindowsDesktop.App.Ref\8.0.33\ref\net8.0\UIAutomationClient.dll">
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="$(NetCoreTargetingPackRoot)\Microsoft.WindowsDesktop.App.Ref\8.0.33\ref\net8.0\UIAutomationTypes.dll">
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="wwwroot\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="restore_taskbar.bat">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

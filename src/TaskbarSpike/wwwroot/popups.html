@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Taskbar Spike — popups</title>
+  <link rel="stylesheet" href="popups.css" />
+</head>
+<body class="v-dock no-glass">
+  <!-- Одно окно, одна страница: все всплывающие панели живут здесь (HANDOFF 8.2).
+       Корень прижат к низу окна — окно подгоняется под размер панели и растёт вверх. -->
+  <main id="root">
+    <section class="pop qs glass" id="panel-quick" data-panel="quick" aria-label="Сеть и звук" hidden></section>
+    <section class="pop cal" id="panel-clock" data-panel="clock" aria-label="Календарь и уведомления" hidden></section>
+    <section class="pop traypop glass" id="panel-tray" data-panel="tray" aria-label="Скрытые значки" hidden></section>
+    <section class="pop deskpop glass" id="panel-desks" data-panel="desks" aria-label="Рабочие столы" hidden></section>
+    <section class="pop start-pop from-center" id="panel-start" data-panel="start" aria-label="Пуск" hidden></section>
+  </main>
+  <script src="popups.js"></script>
+</body>
+</html>

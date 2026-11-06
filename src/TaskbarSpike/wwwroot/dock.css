@@ -1,0 +1,251 @@
+/* Панель задач — по docs/taskbar-redesign/HANDOFF.md (этап 1).
+   Вариант A «Док» = body.v-dock, вариант B «Win10» = body.v-bar.
+   Стекло: размытие и тонировку даёт DWM (акрил окна). Здесь только блик,
+   кромка и содержимое — без backdrop-filter и без внешних теней. */
+
+:root {
+  --accent-rgb: 140, 170, 255;
+  --on-accent-rgb: 16, 19, 26;
+  --accent: rgb(var(--accent-rgb));
+  --on-accent: rgb(var(--on-accent-rgb));
+  --text: #F2F3F7;
+  --text-2: #A7ABB6;
+  --text-3: #8A8F9B;
+  --label: #D7DAE1;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  position: relative;
+}
+
+button { font: inherit; color: inherit; }
+.btn-reset { appearance: none; border: 0; background: transparent; padding: 0; margin: 0; cursor: default; }
+.ic { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; display: block; flex: none; }
+.ic-fill { fill: currentColor; stroke: none; display: block; flex: none; }
+.muted { color: var(--text-2); }
+[hidden] { display: none !important; }
+button:focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.9); outline-offset: -2px; }
+
+/* ---------- Материал: стекло (вариант A) ---------- */
+
+.glass {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.04) 100%);
+  /* кромка 1px и блик сверху — внутри формы, чтобы окно их не обрезало */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.17), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+/* «Эффекты прозрачности» выключены или энергосбережение: акрила нет */
+body.no-glass .glass {
+  /* прозрачная заливка в цвете темы Windows + блик и угловое свечение, как у виджетов на обоях */
+  background:
+    radial-gradient(circle at 0% 0%, rgba(var(--accent-rgb), 0.20), transparent 62%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 42%),
+    color-mix(in srgb, rgb(var(--accent-rgb)) 16%, rgba(38, 40, 54, 0.88)); /* прозрачность: 0.88 (+0.16 от акцента) */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+}
+
+/* ---------- Вариант A: три острова ---------- */
+
+body.v-bar #dock-ui { display: none; }
+body.v-dock #bar-ui { display: none; }
+
+#dock-ui { position: absolute; inset: 0; }
+
+.island {
+  position: absolute;
+  bottom: 6px;
+  height: 42px;
+  padding: 3px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#island-desks { left: 10px; gap: 3px; }
+#island-sys { right: 10px; }
+
+.island.dock {
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 6px;
+  gap: 3px;
+  align-items: flex-end;
+  max-width: calc(100vw - 2 * var(--side, 300px));
+}
+
+.desks { display: flex; gap: 3px; align-items: center; }
+.desk {
+  width: 28px; height: 28px; border-radius: 8px; font-size: 12px; color: var(--text-2);
+  display: flex; align-items: center; justify-content: center; transition: background 120ms ease, color 120ms ease;
+}
+.desk:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.desk.current { background: rgba(255, 255, 255, 0.14); color: var(--text); font-weight: 600; }
+
+.apps-host, .tray-host { display: contents; }
+
+.dock-item,
+.app {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: bottom center;
+  transition: transform 200ms var(--ease), opacity 120ms ease;
+}
+
+.dock-item[data-mag="1"] { transform: scale(1.1); }
+.dock-item[data-mag="n"] { transform: scale(1.04); }
+body.arranging .dock-item { transform: none !important; }
+.dock-item:active { filter: brightness(0.85); }
+
+.tile-glyph { width: 26px; height: 26px; border-radius: 9px; display: flex; align-items: center; justify-content: center; }
+
+.dock-sep { width: 1px; height: 22px; align-self: center; background: rgba(255, 255, 255, 0.14); margin: 0 4px; flex: none; }
+
+.app img, .app .fallback { width: 26px; height: 26px; display: block; }
+.app img { object-fit: contain; pointer-events: none; }
+.app .fallback {
+  display: grid; place-items: center; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12); font-size: 16px; font-weight: 600;
+}
+.app img[hidden], .app .fallback[hidden], .app .badge[hidden] { display: none !important; }
+
+/* индикаторы запущено / активно */
+.app::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.55);
+  opacity: 0;
+  transition: width 200ms ease, opacity 120ms ease, background-color 200ms ease;
+  pointer-events: none;
+}
+.app.running::after { opacity: 1; }
+.app.active::after { width: 14px; background: var(--accent); }
+
+.app .badge {
+  position: absolute; top: -3px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 9px; background: #D9342B; color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center;
+  box-shadow: 0 0 0 2px rgba(24, 26, 33, 0.95); pointer-events: none;
+}
+
+/* перетаскивание */
+body.v-dock .app.dragging { transform: scale(1.1); opacity: 0.92; z-index: 3; }
+
+/* правый остров */
+.tool {
+  height: 34px; min-width: 30px; padding: 0 7px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: background 120ms ease;
+}
+.tool:hover { background: rgba(255, 255, 255, 0.08); }
+.tool.open { background: rgba(255, 255, 255, 0.13); }
+.tool.temp { min-width: 32px; padding: 0 6px; color: var(--text-3); }
+.tool.temp:hover { color: var(--text); }
+
+.ico { display: flex; align-items: center; justify-content: center; }
+.ico svg { display: block; }
+.ico.off { color: var(--text-3); }
+
+.clock-col { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.clock-col .t { font-size: 12.5px; font-weight: 600; }
+.clock-col .d { font-size: 10.5px; }
+
+.tray-icon {
+  width: 26px; height: 34px; flex: none; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; transition: background 120ms ease;
+}
+.tray-icon:hover { background: rgba(255, 255, 255, 0.08); }
+.tray-icon img, .tray-icon .fallback { width: 18px; height: 18px; display: block; }
+.tray-icon img { object-fit: contain; pointer-events: none; }
+.tray-icon .fallback { display: grid; place-items: center; font-size: 11px; font-weight: 600; }
+.tray-icon img[hidden], .tray-icon .fallback[hidden] { display: none !important; }
+
+/* ---------- Вариант B: Win10 ---------- */
+
+.bar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 48px;
+  display: flex; align-items: stretch;
+  background: transparent;                        /* заливку даёт акрил окна */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+body.no-glass .bar { background: rgba(16, 16, 18, 0.96); }
+
+.bar-btn {
+  min-width: 48px; display: flex; align-items: center; justify-content: center; position: relative;
+  transition: background 120ms ease; border-radius: 0;
+}
+.bar-btn:hover { background: rgba(255, 255, 255, 0.10); }
+.bar-btn.open, .bar-btn.active { background: rgba(255, 255, 255, 0.14); }
+.bar-small { min-width: 30px; padding: 0 6px; }
+.bar .grow { flex: 1; }
+.bar .apps-host, .bar .tray-host { display: contents; }
+
+.bar-search {
+  display: flex; align-items: center; gap: 10px; width: 300px; padding: 0 12px; text-align: left;
+  background: rgba(255, 255, 255, 0.09); border-left: 1px solid rgba(255, 255, 255, 0.06); border-right: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 120ms ease;
+}
+.bar-search:hover { background: rgba(255, 255, 255, 0.13); }
+.bar-search input {
+  flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent;
+  color: var(--text); font: inherit; font-size: 13px; user-select: text;
+}
+.bar-search input::placeholder { color: var(--text-2); }
+
+.bar-clock { flex-direction: column; padding: 0 10px; font-size: 12px; line-height: 1.35; font-variant-numeric: tabular-nums; gap: 0; }
+.bar-show { width: 7px; min-width: 7px; padding: 0; border-left: 1px solid rgba(255, 255, 255, 0.2); }
+.bar-show:hover { background: rgba(255, 255, 255, 0.12); }
+.bar-dnd { display: flex; align-items: center; padding: 0 4px 0 6px; }
+.bar .temp { color: var(--text-3); }
+.bar .temp:hover { color: var(--text); }
+
+body.v-bar .app {
+  width: 48px; height: auto; transform: none; transform-origin: center;
+  background: transparent; transition: background 120ms ease, opacity 120ms ease;
+}
+body.v-bar .app:hover { background: rgba(255, 255, 255, 0.10); }
+body.v-bar .app.active { background: rgba(255, 255, 255, 0.14); }
+body.v-bar .app img, body.v-bar .app .fallback { width: 24px; height: 24px; }
+body.v-bar .app .fallback { border-radius: 0; font-size: 12px; }
+body.v-bar .app::after {
+  left: 7px; right: 7px; bottom: 0; width: auto; height: 2px; border-radius: 0; transform: none;
+  background: var(--accent); opacity: 0; transition: opacity 120ms ease, left 120ms ease, right 120ms ease;
+}
+body.v-bar .app.running::after { opacity: 0.75; }
+body.v-bar .app.active::after { left: 0; right: 0; opacity: 1; width: auto; background: var(--accent); }
+body.v-bar .app .badge { top: 5px; right: 6px; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; font-size: 10px; line-height: 15px; box-shadow: none; }
+body.v-bar .app.dragging { background: rgba(255, 255, 255, 0.14); opacity: 0.92; }
+body.v-bar .tray-icon { width: 30px; height: auto; border-radius: 0; }
+body.v-bar .tray-icon:hover { background: rgba(255, 255, 255, 0.10); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 1ms !important; }
+}
