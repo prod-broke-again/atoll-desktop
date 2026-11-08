@@ -19,6 +19,7 @@ public sealed class WallpaperForm : Form
     private const int WM_DISPLAYCHANGE = 0x007E;
     private const int WM_DPICHANGED = 0x02E0;
     private const int WM_ERASEBKGND = 0x0014;
+    private const int SPI_SETDESKWALLPAPER = 0x0014;
 
     private const int WM_HOTKEY = 0x0312;
     private const int WM_SYSCOMMAND = 0x0112;
@@ -64,6 +65,8 @@ public sealed class WallpaperForm : Form
     private volatile bool _displayReconfiguring;
     private int _recoveryFailures;
     private CoreWebView2Environment? _webViewEnvironment;
+    /// <summary>Cached HWND for the mouse-hook thread — never touch <see cref="Control.Handle"/> there (it can recreate the window off the UI thread).</summary>
+    private IntPtr _hwndCache;
     private Point _screenOrigin = Point.Empty;
     private string? _mappedPinsDir;
     private readonly WallpaperMediaHost _wallpaperMedia = new();
@@ -1142,6 +1145,8 @@ public sealed class WallpaperForm : Form
         _desktopManager.AttachWindow(Handle);
         _isAttached = true;
         ApplyPrimaryBounds();
+        if (Opacity < 1) Opacity = 1;
+        if (!Visible) Visible = true;
     }
 
     private void EnsureOnDesktop()
@@ -1231,6 +1236,8 @@ public sealed class WallpaperForm : Form
             }
 
             ApplyPrimaryBounds();
+            if (Opacity < 1) Opacity = 1;
+            if (!Visible) Visible = true;
         }
         finally
         {
@@ -1254,6 +1261,90 @@ public sealed class WallpaperForm : Form
         if (_isShuttingDown || IsDisposed) return;
         _desktopParentDebounceTimer.Stop();
         _desktopParentDebounceTimer.Start();
+    }
+
+    /// <summary>
+    /// Windows static-wallpaper / slideshow is about to rebuild WorkerW. Leave the tree first
+    /// so Explorer does not destroy our HWND (and WebView2) with the old parent.
+    /// </summary>
+    private void OnWindowsWallpaperChanging()
+    {
+        if (_isShuttingDown || IsDisposed) return;
+
+        _displayReconfiguring = true;
+        _logger.LogInformation("Windows wallpaper change signal — detaching from WorkerW before Explorer rebuilds it.");
+
+        if (_isAttached && IsHandleCreated)
+        {
+            try
+            {
+                // Avoid a top-level black flash while we sit outside WorkerW.
+                Opacity = 0;
+                DesktopManager.DetachWindow(Handle);
+                _isAttached = false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Preemptive WorkerW detach failed.");
+            }
+        }
+
+        // Reuse the longer display debounce so reattach happens after Explorer settles.
+        _displayChangeDebounceTimer.Stop();
+        _displayChangeDebounceTimer.Start();
+    }
+
+    /// <summary>
+    /// After WorkerW kills our child HWND, <see cref="Control.BeginInvoke"/> is dead.
+    /// Recreate the handle on the UI sync context, then rebuild WebView2.
+    /// </summary>
+    private void ScheduleHandleRecovery()
+    {
+        if (_isShuttingDown || IsDisposed) return;
+        _pendingEngineRecovery = true;
+        _displayReconfiguring = true;
+
+        var ctx = SynchronizationContext.Current;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try { Thread.Sleep(600); } catch { }
+
+            void Go()
+            {
+                if (_isShuttingDown || IsDisposed) return;
+                try
+                {
+                    if (!IsHandleCreated)
+                    {
+                        _logger.LogInformation("Recreating wallpaper HWND after Explorer destroyed it.");
+                        CreateHandle();
+                    }
+
+                    Opacity = 0;
+                    QueueEngineRecovery();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to recreate wallpaper HWND after Explorer rebuild.");
+                }
+                finally
+                {
+                    // Let OnDisplayChangeDebounced / recovery clear the flag after reattach.
+                    _displayChangeDebounceTimer.Stop();
+                    _displayChangeDebounceTimer.Start();
+                }
+            }
+
+            if (ctx != null)
+            {
+                ctx.Post(_ => Go(), null);
+            }
+            else
+            {
+                try { BeginInvoke(new MethodInvoker(Go)); }
+                catch { _logger.LogError("No UI sync context to recreate wallpaper HWND."); }
+            }
+        });
     }
 
     /// <summary>
@@ -1309,11 +1400,12 @@ public sealed class WallpaperForm : Form
         }
 
         // WindowFromPoint during WorkerW rebuild can stall the LL mouse hook (whole desktop freezes).
-        if (_displayReconfiguring || !IsHandleCreated) return true;
+        var self = _hwndCache;
+        if (_displayReconfiguring || self == IntPtr.Zero) return true;
 
         var hwnd = WindowFromPoint(new POINT { X = screenX, Y = screenY });
         if (hwnd == IntPtr.Zero) return false;
-        if (hwnd == Handle) return true;
+        if (hwnd == self) return true;
         var root = GetAncestor(hwnd, 2 /* GA_ROOT */);
         var buf = new char[64];
         var len = GetClassName(root, buf, buf.Length);
@@ -1490,11 +1582,25 @@ public sealed class WallpaperForm : Form
 
         if (m.Msg == WM_SETTINGCHANGE && !_isShuttingDown)
         {
-            var setting = Marshal.PtrToStringUni(m.LParam);
-            if (setting is "ImmersiveColorSet" or "SPI_SETDESKWALLPAPER")
+            // Windows slideshow often sends wParam=SPI_SETDESKWALLPAPER with lParam "Windows"
+            // (not the literal "SPI_SETDESKWALLPAPER"). Missing that leaves us parented under a
+            // WorkerW that Explorer is about to destroy — HWND death, dead tray, black desktop.
+            var setting = Marshal.PtrToStringUni(m.LParam) ?? string.Empty;
+            var spi = m.WParam.ToInt64();
+            var wallpaperSignal =
+                spi == SPI_SETDESKWALLPAPER
+                || setting.Equals("SPI_SETDESKWALLPAPER", StringComparison.OrdinalIgnoreCase)
+                || setting.Equals("Windows", StringComparison.OrdinalIgnoreCase)
+                || setting.Equals("Desktop", StringComparison.OrdinalIgnoreCase);
+            var colorSignal = setting.Equals("ImmersiveColorSet", StringComparison.OrdinalIgnoreCase);
+
+            if (wallpaperSignal)
             {
-                // Coalesce Explorer's wallpaper/theme storm — immediate EnsureOnDesktop floods SetParent
-                // and paints the default white WebView host between frames.
+                try { BeginInvoke(OnWindowsWallpaperChanging); }
+                catch { ScheduleHandleRecovery(); }
+            }
+            else if (colorSignal)
+            {
                 try { BeginInvoke(ScheduleEnsureOnDesktop); } catch { }
             }
         }
@@ -1616,6 +1722,7 @@ public sealed class WallpaperForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
+        _hwndCache = Handle;
         // First create is handled by OnShown. Later recreates (WorkerW killed the child HWND)
         // need a fresh WebView2 — otherwise we paint only HostBackdrop (black desktop).
         if (_isShuttingDown || !_isInitialized) return;
@@ -1625,6 +1732,7 @@ public sealed class WallpaperForm : Form
 
     protected override void OnHandleDestroyed(EventArgs e)
     {
+        _hwndCache = IntPtr.Zero;
         if (!_isShuttingDown)
         {
             _logger.LogWarning(
@@ -1632,6 +1740,8 @@ public sealed class WallpaperForm : Form
                 Environment.StackTrace);
             _isAttached = false;
             TearDownWebViewControl();
+            // BeginInvoke is unusable without a handle — force recreate on the UI sync context.
+            ScheduleHandleRecovery();
         }
         else
         {
