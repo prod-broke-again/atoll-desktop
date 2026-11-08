@@ -58,6 +58,8 @@ public sealed class WallpaperForm : Form
     private bool _isAttached;
     private bool _isInitialized;
     private bool _isShuttingDown;
+    private bool _engineStarting;
+    private bool _recoverQueued;
     private Point _screenOrigin = Point.Empty;
     private string? _mappedPinsDir;
     private readonly WallpaperMediaHost _wallpaperMedia = new();
@@ -430,12 +432,56 @@ public sealed class WallpaperForm : Form
     protected override async void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        await EnsureEngineAsync();
+    }
 
-        if (_isInitialized) return;
-        _isInitialized = true;
+    private bool IsWebViewLive() =>
+        _webView != null && !_webView.IsDisposed && _webView.CoreWebView2 != null;
 
+    private void EnsureWebViewControl()
+    {
+        if (_webView != null && !_webView.IsDisposed) return;
+        _webView = new WebView2
+        {
+            Dock = DockStyle.Fill,
+            DefaultBackgroundColor = HostBackdrop
+        };
+        Controls.Add(_webView);
+    }
+
+    private void TearDownWebViewControl()
+    {
         try
         {
+            if (_webView == null) return;
+            try
+            {
+                if (!_webView.IsDisposed)
+                {
+                    Controls.Remove(_webView);
+                    _webView.Dispose();
+                }
+            }
+            catch { }
+            _webView = null;
+        }
+        catch { }
+    }
+
+    private async Task EnsureEngineAsync()
+    {
+        if (_isShuttingDown || IsDisposed) return;
+        if (_engineStarting) return;
+        if (IsWebViewLive())
+        {
+            if (!_isAttached && IsHandleCreated) AttachToDesktop();
+            return;
+        }
+
+        _engineStarting = true;
+        try
+        {
+            EnsureWebViewControl();
             _logger.LogInformation("Initializing WebView2 engine...");
             var userDataPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -776,6 +822,7 @@ public sealed class WallpaperForm : Form
             _ = RegisterHotKey(Handle, HOTKEY_PRIVACY_ID, MOD_WIN | MOD_ALT, VK_H);
 
             _mouseHook.Start();
+            _isInitialized = true;
             _logger.LogInformation("WallpaperForm successfully attached behind desktop icons.");
 
             if (_configManager.CurrentConfig.Launcher.HideDesktopIcons)
@@ -787,6 +834,30 @@ public sealed class WallpaperForm : Form
         catch (Exception ex)
         {
             _logger.LogCritical(ex, "Failed to initialize WallpaperForm and WebView2.");
+        }
+        finally
+        {
+            _engineStarting = false;
+        }
+    }
+
+    private void QueueEngineRecovery()
+    {
+        if (_isShuttingDown || _recoverQueued) return;
+        _recoverQueued = true;
+        try
+        {
+            BeginInvoke(new Action(async () =>
+            {
+                _recoverQueued = false;
+                if (_isShuttingDown || IsDisposed || !IsHandleCreated) return;
+                _logger.LogInformation("Recovering wallpaper engine after host HWND loss...");
+                await EnsureEngineAsync();
+            }));
+        }
+        catch
+        {
+            _recoverQueued = false;
         }
     }
 
@@ -970,6 +1041,12 @@ public sealed class WallpaperForm : Form
     {
         if (_isShuttingDown || !IsHandleCreated || IsDisposed)
         {
+            return;
+        }
+
+        if (!IsWebViewLive())
+        {
+            QueueEngineRecovery();
             return;
         }
 
@@ -1265,6 +1342,12 @@ public sealed class WallpaperForm : Form
         {
             _logger.LogInformation("Explorer restart detected via TaskbarCreated. Reattaching to WorkerW...");
             _isAttached = false;
+            if (!IsWebViewLive())
+            {
+                QueueEngineRecovery();
+                return;
+            }
+
             AttachToDesktop();
             return;
         }
@@ -1394,9 +1477,31 @@ public sealed class WallpaperForm : Form
         base.OnFormClosing(e);
     }
 
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        // First create is handled by OnShown. Later recreates (WorkerW killed the child HWND)
+        // need a fresh WebView2 — otherwise we paint only HostBackdrop (black desktop).
+        if (_isShuttingDown || !_isInitialized) return;
+        if (IsWebViewLive()) return;
+        QueueEngineRecovery();
+    }
+
     protected override void OnHandleDestroyed(EventArgs e)
     {
-        _logger.LogWarning("WallpaperForm.OnHandleDestroyed called! Stack: {StackTrace}", Environment.StackTrace);
+        if (!_isShuttingDown)
+        {
+            _logger.LogWarning(
+                "WallpaperForm HWND destroyed unexpectedly (Explorer WorkerW rebuild?). Stack: {StackTrace}",
+                Environment.StackTrace);
+            _isAttached = false;
+            TearDownWebViewControl();
+        }
+        else
+        {
+            _logger.LogWarning("WallpaperForm.OnHandleDestroyed called! Stack: {StackTrace}", Environment.StackTrace);
+        }
+
         base.OnHandleDestroyed(e);
     }
 

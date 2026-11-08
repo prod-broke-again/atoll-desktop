@@ -33,6 +33,13 @@ public sealed class WallpaperMediaHost
 
     public void Attach(CoreWebView2 core)
     {
+        // After Explorer destroys the WorkerW child HWND we create a new CoreWebView2 —
+        // virtual host mappings do not survive across cores, so remap.
+        if (!ReferenceEquals(_core, core))
+        {
+            _mapped = false;
+        }
+
         _core = core;
         EnsureMapped();
     }
