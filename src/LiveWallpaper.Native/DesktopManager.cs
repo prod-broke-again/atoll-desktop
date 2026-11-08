@@ -103,8 +103,13 @@ public sealed class DesktopManager
     public bool AttachWindow(IntPtr hWnd)
     {
         if (hWnd == IntPtr.Zero) return false;
-        if (TargetWorkerW == IntPtr.Zero) LocateWallpaperParent();
-        if (TargetWorkerW == IntPtr.Zero) return false;
+        // Prefer an already-existing WorkerW; only spawn when none is present.
+        if (FindExistingParent() == IntPtr.Zero)
+        {
+            LocateWallpaperParent();
+        }
+
+        if (TargetWorkerW == IntPtr.Zero || !IsWindow(TargetWorkerW)) return false;
 
         SetParent(hWnd, TargetWorkerW);
         // SWP_NOCOPYBITS: after SetParent the old surface bits would otherwise paint as an opaque white fill.
@@ -165,6 +170,10 @@ public sealed class DesktopManager
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hWnd);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);

@@ -60,10 +60,15 @@ public sealed class WallpaperForm : Form
     private bool _isShuttingDown;
     private bool _engineStarting;
     private bool _recoverQueued;
+    private bool _pendingEngineRecovery;
+    private volatile bool _displayReconfiguring;
+    private int _recoveryFailures;
+    private CoreWebView2Environment? _webViewEnvironment;
     private Point _screenOrigin = Point.Empty;
     private string? _mappedPinsDir;
     private readonly WallpaperMediaHost _wallpaperMedia = new();
-    private readonly System.Windows.Forms.Timer _displayChangeDebounceTimer = new() { Interval = 750 };
+    // Hotplug storms need longer coalesce than theme tweaks — 1.2s lets WorkerW settle.
+    private readonly System.Windows.Forms.Timer _displayChangeDebounceTimer = new() { Interval = 1200 };
     private readonly System.Windows.Forms.Timer _desktopParentDebounceTimer = new() { Interval = 400 };
     private static readonly Color HostBackdrop = Color.FromArgb(7, 8, 13);
 
@@ -478,19 +483,49 @@ public sealed class WallpaperForm : Form
             return;
         }
 
+        if (InvokeRequired)
+        {
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try
+            {
+                BeginInvoke(new MethodInvoker(() =>
+                {
+                    EnsureEngineAsync().ContinueWith(t =>
+                    {
+                        if (t.IsFaulted) tcs.TrySetException(t.Exception!.GetBaseException());
+                        else if (t.IsCanceled) tcs.TrySetCanceled();
+                        else tcs.TrySetResult();
+                    }, TaskScheduler.Default);
+                }));
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+
+            await tcs.Task.ConfigureAwait(false);
+            return;
+        }
+
         _engineStarting = true;
         try
         {
             EnsureWebViewControl();
             _logger.LogInformation("Initializing WebView2 engine...");
-            var userDataPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "LiveWallpaper",
-                "WebView2_Data");
+            // Reuse one Environment for the process — recreating after HWND loss can throw
+            // RPC_E_CHANGED_MODE (0x80010106) when COM apartment state is already set.
+            if (_webViewEnvironment == null)
+            {
+                var userDataPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "LiveWallpaper",
+                    "WebView2_Data");
+                var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
+                _webViewEnvironment = await CoreWebView2Environment.CreateAsync(null, userDataPath, options)
+                    .ConfigureAwait(true);
+            }
 
-            var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required");
-            var env = await CoreWebView2Environment.CreateAsync(null, userDataPath, options);
-            await _webView!.EnsureCoreWebView2Async(env);
+            await _webView!.EnsureCoreWebView2Async(_webViewEnvironment).ConfigureAwait(true);
             _webView.CoreWebView2.PermissionRequested += (_, e) =>
             {
                 if (e.PermissionKind == CoreWebView2PermissionKind.Autoplay)
@@ -823,6 +858,7 @@ public sealed class WallpaperForm : Form
 
             _mouseHook.Start();
             _isInitialized = true;
+            _recoveryFailures = 0;
             _logger.LogInformation("WallpaperForm successfully attached behind desktop icons.");
 
             if (_configManager.CurrentConfig.Launcher.HideDesktopIcons)
@@ -843,21 +879,86 @@ public sealed class WallpaperForm : Form
 
     private void QueueEngineRecovery()
     {
-        if (_isShuttingDown || _recoverQueued) return;
+        if (_isShuttingDown) return;
+        if (_displayReconfiguring)
+        {
+            _pendingEngineRecovery = true;
+            return;
+        }
+
+        if (_recoverQueued) return;
         _recoverQueued = true;
+
+        void Kickoff() => _ = RecoverEngineCoreAsync();
+
         try
         {
-            BeginInvoke(new Action(async () =>
+            if (!IsHandleCreated)
             {
+                _pendingEngineRecovery = true;
                 _recoverQueued = false;
-                if (_isShuttingDown || IsDisposed || !IsHandleCreated) return;
-                _logger.LogInformation("Recovering wallpaper engine after host HWND loss...");
-                await EnsureEngineAsync();
-            }));
+                return;
+            }
+
+            if (InvokeRequired) BeginInvoke(new MethodInvoker(Kickoff));
+            else Kickoff();
         }
         catch
         {
             _recoverQueued = false;
+            _pendingEngineRecovery = true;
+        }
+    }
+
+    private async Task RecoverEngineCoreAsync()
+    {
+        try
+        {
+            // Explorer rebuilds WorkerW for a while after monitor hotplug; creating WebView2
+            // mid-storm races COM and often yields RPC_E_CHANGED_MODE.
+            await Task.Delay(1000).ConfigureAwait(true);
+            if (_isShuttingDown || IsDisposed) return;
+            if (!IsHandleCreated || _displayReconfiguring)
+            {
+                _pendingEngineRecovery = true;
+                return;
+            }
+
+            if (IsWebViewLive())
+            {
+                if (!_isAttached) AttachToDesktop();
+                return;
+            }
+
+            _logger.LogInformation("Recovering wallpaper engine after host HWND loss...");
+            await EnsureEngineAsync().ConfigureAwait(true);
+            if (!IsWebViewLive())
+            {
+                _recoveryFailures++;
+                if (_recoveryFailures <= 3)
+                {
+                    _pendingEngineRecovery = true;
+                }
+                else
+                {
+                    _logger.LogError("WebView2 recovery failed {Count} times; giving up until next display change.", _recoveryFailures);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _recoveryFailures++;
+            _logger.LogError(ex, "WebView2 recovery failed (attempt {Attempt}).", _recoveryFailures);
+            if (_recoveryFailures <= 3) _pendingEngineRecovery = true;
+        }
+        finally
+        {
+            _recoverQueued = false;
+            if (_pendingEngineRecovery && !_displayReconfiguring && !_isShuttingDown && _recoveryFailures <= 3)
+            {
+                _pendingEngineRecovery = false;
+                QueueEngineRecovery();
+            }
         }
     }
 
@@ -1032,6 +1133,12 @@ public sealed class WallpaperForm : Form
     public void AttachToDesktop()
     {
         if (_isAttached) return;
+        // Always refresh WorkerW — TargetWorkerW goes stale after monitor hotplug / Explorer rebuild.
+        if (_desktopManager.FindExistingParent() == IntPtr.Zero)
+        {
+            _desktopManager.LocateWallpaperParent();
+        }
+
         _desktopManager.AttachWindow(Handle);
         _isAttached = true;
         ApplyPrimaryBounds();
@@ -1078,7 +1185,8 @@ public sealed class WallpaperForm : Form
             return;
         }
 
-        _logger.LogInformation("Display settings change detected. Debouncing 750ms...");
+        _displayReconfiguring = true;
+        _logger.LogInformation("Display settings change detected. Debouncing {Ms}ms...", _displayChangeDebounceTimer.Interval);
         _displayChangeDebounceTimer.Stop();
         _displayChangeDebounceTimer.Start();
     }
@@ -1086,28 +1194,53 @@ public sealed class WallpaperForm : Form
     private void OnDisplayChangeDebounced(object? sender, EventArgs e)
     {
         _displayChangeDebounceTimer.Stop();
-        if (_isShuttingDown || IsDisposed || !IsHandleCreated) return;
+        if (_isShuttingDown || IsDisposed) return;
 
-        _logger.LogInformation("Debounce timer elapsed. Re-evaluating desktop parent and primary bounds...");
-
-        var currentParent = GetParent(Handle);
-        // Prefer FindExistingParent: LocateWallpaperParent's 0x052C spawn fights Explorer
-        // while it is already rebuilding WorkerW for a wallpaper/display change.
-        var targetParent = _desktopManager.FindExistingParent();
-        if (targetParent == IntPtr.Zero)
+        try
         {
-            targetParent = _desktopManager.LocateWallpaperParent();
-        }
+            if (!IsHandleCreated)
+            {
+                _pendingEngineRecovery = true;
+                return;
+            }
 
-        if (currentParent == IntPtr.Zero || !IsWindow(currentParent) || currentParent != targetParent || !_isAttached)
+            _logger.LogInformation("Debounce timer elapsed. Re-evaluating desktop parent and primary bounds...");
+
+            if (!IsWebViewLive())
+            {
+                _pendingEngineRecovery = true;
+                return;
+            }
+
+            var currentParent = GetParent(Handle);
+            // Never spawn WorkerW (0x052C) during hotplug — Explorer is already rebuilding it.
+            var targetParent = _desktopManager.FindExistingParent();
+            if (targetParent == IntPtr.Zero)
+            {
+                _logger.LogWarning("No WorkerW yet after display change; deferring reattach.");
+                _pendingEngineRecovery = true;
+                return;
+            }
+
+            if (currentParent == IntPtr.Zero || !IsWindow(currentParent) || currentParent != targetParent || !_isAttached)
+            {
+                _logger.LogInformation("Wallpaper parent invalid or shifted after display configuration. Reattaching (old={Old}, new={New}).", currentParent, targetParent);
+                _isAttached = false;
+                _desktopManager.AttachWindow(Handle);
+                _isAttached = true;
+            }
+
+            ApplyPrimaryBounds();
+        }
+        finally
         {
-            _logger.LogInformation("Wallpaper parent invalid or shifted after display configuration. Reattaching (old={Old}, new={New}).", currentParent, targetParent);
-            _isAttached = false;
-            _desktopManager.AttachWindow(Handle);
-            _isAttached = true;
+            _displayReconfiguring = false;
+            if (_pendingEngineRecovery && !_isShuttingDown)
+            {
+                _pendingEngineRecovery = false;
+                QueueEngineRecovery();
+            }
         }
-
-        ApplyPrimaryBounds();
     }
 
     private void OnDesktopParentDebounced(object? sender, EventArgs e)
@@ -1174,6 +1307,9 @@ public sealed class WallpaperForm : Form
         {
             return false;
         }
+
+        // WindowFromPoint during WorkerW rebuild can stall the LL mouse hook (whole desktop freezes).
+        if (_displayReconfiguring || !IsHandleCreated) return true;
 
         var hwnd = WindowFromPoint(new POINT { X = screenX, Y = screenY });
         if (hwnd == IntPtr.Zero) return false;
