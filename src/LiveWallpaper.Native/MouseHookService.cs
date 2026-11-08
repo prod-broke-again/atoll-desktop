@@ -85,11 +85,7 @@ public sealed class MouseHookService : IDisposable
                     DispatchMessage(ref msg);
                 }
 
-                if (_hookId != IntPtr.Zero)
-                {
-                    UnhookWindowsHookEx(_hookId);
-                    _hookId = IntPtr.Zero;
-                }
+                UnhookIfNeeded();
             })
             {
                 IsBackground = true,
@@ -105,6 +101,8 @@ public sealed class MouseHookService : IDisposable
     {
         try
         {
+            if (_disposed) return CallNextHookEx(_hookId, nCode, wParam, lParam);
+
             if (nCode >= 0)
             {
                 var msg = wParam.ToInt32();
@@ -166,10 +164,21 @@ public sealed class MouseHookService : IDisposable
 
     public void Dispose()
     {
+        // Drop callbacks first so a late hook invocation cannot re-enter UI during exit.
+        ShouldConsumeAt = null;
+        MouseMoved = null;
+        MouseDown = null;
+        MouseUp = null;
+        MouseWheel = null;
+
         lock (_lock)
         {
             if (_disposed) return;
             _disposed = true;
+
+            // Unhook before joining. If Join times out, the global LL hook must not stay installed —
+            // that freezes mouse input for the whole desktop.
+            UnhookIfNeeded();
 
             if (_hookThreadId != 0)
             {
@@ -178,9 +187,20 @@ public sealed class MouseHookService : IDisposable
 
             if (_hookThread != null && _hookThread.IsAlive)
             {
-                _hookThread.Join(1000);
+                _hookThread.Join(500);
             }
+
+            _mouseProc = null;
+            _hookThread = null;
+            _hookThreadId = 0;
         }
+    }
+
+    private void UnhookIfNeeded()
+    {
+        if (_hookId == IntPtr.Zero) return;
+        try { UnhookWindowsHookEx(_hookId); } catch { }
+        _hookId = IntPtr.Zero;
     }
 
     private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);

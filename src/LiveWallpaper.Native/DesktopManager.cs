@@ -12,6 +12,7 @@ public sealed class DesktopManager
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_SHOWWINDOW = 0x0040;
+    private const uint SWP_NOCOPYBITS = 0x0100;
     private static readonly IntPtr HWND_BOTTOM = new(1);
 
     public IntPtr TargetWorkerW { get; private set; } = IntPtr.Zero;
@@ -106,7 +107,8 @@ public sealed class DesktopManager
         if (TargetWorkerW == IntPtr.Zero) return false;
 
         SetParent(hWnd, TargetWorkerW);
-        SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        // SWP_NOCOPYBITS: after SetParent the old surface bits would otherwise paint as an opaque white fill.
+        SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOCOPYBITS);
         return true;
     }
 

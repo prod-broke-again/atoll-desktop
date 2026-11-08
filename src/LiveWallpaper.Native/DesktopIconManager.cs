@@ -7,6 +7,7 @@ public static class DesktopIconManager
 {
     private const uint WM_COMMAND = 0x0111;
     private const int TOGGLE_DESKTOP_ICONS_CMD = 0x7402;
+    private const uint SMTO_ABORTIFHUNG = 0x0002;
 
     private static bool? _originalVisibility;
     private static readonly object _lock = new();
@@ -21,8 +22,15 @@ public static class DesktopIconManager
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindowVisible(IntPtr hWnd);
 
-    [DllImport("user32.dll", CharSet = CharSet.Auto)]
-    private static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(
+        IntPtr hWnd,
+        uint Msg,
+        IntPtr wParam,
+        IntPtr lParam,
+        uint fuFlags,
+        uint uTimeout,
+        out IntPtr lpdwResult);
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -95,7 +103,16 @@ public static class DesktopIconManager
         var defView = FindShellDefView();
         if (defView != IntPtr.Zero)
         {
-            _ = SendMessage(defView, WM_COMMAND, new IntPtr(TOGGLE_DESKTOP_ICONS_CMD), IntPtr.Zero);
+            // Timed: a synchronous SendMessage into Explorer can deadlock exit while a
+            // low-level mouse hook / WorkerW rebuild is still settling.
+            _ = SendMessageTimeout(
+                defView,
+                WM_COMMAND,
+                new IntPtr(TOGGLE_DESKTOP_ICONS_CMD),
+                IntPtr.Zero,
+                SMTO_ABORTIFHUNG,
+                500,
+                out _);
         }
     }
 

@@ -269,8 +269,12 @@ class LiveWallpaperApp {
           this.serverWidget.setEnabled(serverCfg?.enabled !== false);
         }
         {
-          // Layout picked in the tray: re-lay out the current pictures right away.
           const c = message.config?.collage;
+          if (c && c.enabled === false) {
+            this.clearCollage();
+            break;
+          }
+          // Layout picked in the tray: re-lay out the current pictures right away.
           const last = this.lastCollageMsg;
           if (c && last && !c.shuffleStyle && c.style && c.style.toLowerCase() !== last.style.toLowerCase()) {
             this.loadNewCollage({ ...last, style: c.style });
@@ -289,7 +293,21 @@ class LiveWallpaperApp {
       case 'collage':
         this.loadNewCollage(message);
         break;
+
+      case 'collage_clear':
+        this.clearCollage();
+        break;
     }
+  }
+
+  /** Tear down pin overlay when collage is disabled mid-session. */
+  private clearCollage(): void {
+    this.loadToken++;
+    this.retire(this.previousCollage);
+    this.retire(this.currentCollage);
+    this.previousCollage = null;
+    this.currentCollage = null;
+    this.lastCollageMsg = null;
   }
 
   private applyVideoWallpaper(

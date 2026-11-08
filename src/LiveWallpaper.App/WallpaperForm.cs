@@ -18,6 +18,7 @@ public sealed class WallpaperForm : Form
     private const int WM_SETTINGCHANGE = 0x001A;
     private const int WM_DISPLAYCHANGE = 0x007E;
     private const int WM_DPICHANGED = 0x02E0;
+    private const int WM_ERASEBKGND = 0x0014;
 
     private const int WM_HOTKEY = 0x0312;
     private const int WM_SYSCOMMAND = 0x0112;
@@ -61,6 +62,8 @@ public sealed class WallpaperForm : Form
     private string? _mappedPinsDir;
     private readonly WallpaperMediaHost _wallpaperMedia = new();
     private readonly System.Windows.Forms.Timer _displayChangeDebounceTimer = new() { Interval = 750 };
+    private readonly System.Windows.Forms.Timer _desktopParentDebounceTimer = new() { Interval = 400 };
+    private static readonly Color HostBackdrop = Color.FromArgb(7, 8, 13);
 
     public WallpaperForm(
         IConfigManager configManager,
@@ -95,11 +98,13 @@ public sealed class WallpaperForm : Form
 
         _taskbarCreatedMsg = RegisterWindowMessage("TaskbarCreated");
         _displayChangeDebounceTimer.Tick += OnDisplayChangeDebounced;
+        _desktopParentDebounceTimer.Tick += OnDesktopParentDebounced;
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         ShowInTaskbar = false;
+        BackColor = HostBackdrop;
         // Only the primary monitor: a "phantom" second display (e.g. a plugged-in VGA adapter)
         // must not stretch the wallpaper and shift the collage off-screen.
         var primary = Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen;
@@ -113,7 +118,9 @@ public sealed class WallpaperForm : Form
     {
         _webView = new WebView2
         {
-            Dock = DockStyle.Fill
+            Dock = DockStyle.Fill,
+            // Default host color is white — without this, every WorkerW reparent/resize flashes a white screen.
+            DefaultBackgroundColor = HostBackdrop
         };
         Controls.Add(_webView);
 
@@ -455,13 +462,16 @@ public sealed class WallpaperForm : Form
                         if (type == "ready")
                         {
                             _logger.LogInformation("Web frontend reported ready handshake. Dispatching initial state...");
-                            if (_collageService.CurrentCollage != null)
+                            if (_configManager.CurrentConfig.Collage.Enabled)
                             {
-                                OnCollageChanged(this, _collageService.CurrentCollage);
-                            }
-                            else
-                            {
-                                _collageService.RotateNow();
+                                if (_collageService.CurrentCollage != null)
+                                {
+                                    OnCollageChanged(this, _collageService.CurrentCollage);
+                                }
+                                else
+                                {
+                                    _collageService.RotateNow();
+                                }
                             }
 
                             if (_weatherService.CurrentWeather != null)
@@ -1004,10 +1014,12 @@ public sealed class WallpaperForm : Form
         _logger.LogInformation("Debounce timer elapsed. Re-evaluating desktop parent and primary bounds...");
 
         var currentParent = GetParent(Handle);
-        var targetParent = _desktopManager.LocateWallpaperParent();
+        // Prefer FindExistingParent: LocateWallpaperParent's 0x052C spawn fights Explorer
+        // while it is already rebuilding WorkerW for a wallpaper/display change.
+        var targetParent = _desktopManager.FindExistingParent();
         if (targetParent == IntPtr.Zero)
         {
-            targetParent = _desktopManager.FindExistingParent();
+            targetParent = _desktopManager.LocateWallpaperParent();
         }
 
         if (currentParent == IntPtr.Zero || !IsWindow(currentParent) || currentParent != targetParent || !_isAttached)
@@ -1019,6 +1031,19 @@ public sealed class WallpaperForm : Form
         }
 
         ApplyPrimaryBounds();
+    }
+
+    private void OnDesktopParentDebounced(object? sender, EventArgs e)
+    {
+        _desktopParentDebounceTimer.Stop();
+        EnsureOnDesktop();
+    }
+
+    private void ScheduleEnsureOnDesktop()
+    {
+        if (_isShuttingDown || IsDisposed) return;
+        _desktopParentDebounceTimer.Stop();
+        _desktopParentDebounceTimer.Start();
     }
 
     /// <summary>
@@ -1043,8 +1068,16 @@ public sealed class WallpaperForm : Form
         const uint SWP_NOACTIVATE = 0x0010;
         const uint SWP_SHOWWINDOW = 0x0040;
         const uint SWP_FRAMECHANGED = 0x0020;
+        const uint SWP_NOCOPYBITS = 0x0100;
 
-        _ = SetWindowPos(Handle, IntPtr.Zero, x, y, primary.Width, primary.Height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+        _ = SetWindowPos(
+            Handle,
+            IntPtr.Zero,
+            x,
+            y,
+            primary.Width,
+            primary.Height,
+            SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOCOPYBITS);
 
         Width = primary.Width;
         Height = primary.Height;
@@ -1187,6 +1220,10 @@ public sealed class WallpaperForm : Form
 
         MapPinsHost();
         DesktopIconManager.SetIconsVisible(!config.Launcher.HideDesktopIcons);
+        if (!config.Collage.Enabled)
+        {
+            SendWebMessage(new { type = "collage_clear" });
+        }
         SendConfigToWeb(config);
     }
 
@@ -1208,6 +1245,13 @@ public sealed class WallpaperForm : Form
 
     protected override void WndProc(ref Message m)
     {
+        // Fresh window surfaces erase with the class brush (white) unless we claim the erase.
+        if (m.Msg == WM_ERASEBKGND)
+        {
+            m.Result = (IntPtr)1;
+            return;
+        }
+
         if (m.Msg == WM_SYSCOMMAND && (m.WParam.ToInt32() & 0xFFF0) == SC_CLOSE)
         {
             if (!_isShuttingDown)
@@ -1230,7 +1274,9 @@ public sealed class WallpaperForm : Form
             var setting = Marshal.PtrToStringUni(m.LParam);
             if (setting is "ImmersiveColorSet" or "SPI_SETDESKWALLPAPER")
             {
-                BeginInvoke(new Action(EnsureOnDesktop));
+                // Coalesce Explorer's wallpaper/theme storm — immediate EnsureOnDesktop floods SetParent
+                // and paints the default white WebView host between frames.
+                try { BeginInvoke(ScheduleEnsureOnDesktop); } catch { }
             }
         }
 
@@ -1279,23 +1325,71 @@ public sealed class WallpaperForm : Form
             return;
         }
 
+        _isShuttingDown = true;
         _logger.LogWarning("WallpaperForm.OnFormClosing called! CloseReason: {CloseReason}. Stack: {StackTrace}", e.CloseReason, Environment.StackTrace);
         try { Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged; } catch { }
+        try { _configManager.ConfigChanged -= OnConfigChanged; } catch { }
+        try { _collageService.CollageChanged -= OnCollageChanged; } catch { }
+        try { _autoPauseService.PauseStateChanged -= OnPauseStateChanged; } catch { }
+        try { _pluginHost.SnapshotReceived -= OnPluginSnapshotReceived; } catch { }
+
         _displayChangeDebounceTimer.Stop();
         _displayChangeDebounceTimer.Dispose();
+        _desktopParentDebounceTimer.Stop();
+        _desktopParentDebounceTimer.Dispose();
+
+        // Unhook first: a stuck LL mouse hook freezes input for the whole desktop during teardown.
+        try { _mouseHook.MouseMoved -= OnMouseMoved; } catch { }
+        try { _mouseHook.MouseDown -= OnMouseDown; } catch { }
+        try { _mouseHook.MouseUp -= OnMouseUp; } catch { }
+        try { _mouseHook.MouseWheel -= OnMouseWheel; } catch { }
+        _mouseHook.ShouldConsumeAt = null;
         _mouseHook.Dispose();
 
         _ = UnregisterHotKey(Handle, HOTKEY_ROTATE_ID);
         _ = UnregisterHotKey(Handle, HOTKEY_PAUSE_ID);
         _ = UnregisterHotKey(Handle, HOTKEY_PRIVACY_ID);
 
+        try
+        {
+            if (_webView?.CoreWebView2 != null)
+            {
+                _webView.CoreWebView2.Stop();
+            }
+        }
+        catch { }
+
         if (_isAttached)
         {
             DesktopManager.DetachWindow(Handle);
+            _isAttached = false;
             DesktopManager.RefreshDesktopWallpaper();
         }
 
-        DesktopIconManager.RestoreOriginalState();
+        // Timed Explorer call (see DesktopIconManager) — still keep it off the critical path
+        // if Explorer is mid-rebuild from the wallpaper detach above.
+        try
+        {
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { DesktopIconManager.RestoreOriginalState(); } catch { }
+            });
+        }
+        catch
+        {
+            try { DesktopIconManager.RestoreOriginalState(); } catch { }
+        }
+
+        try
+        {
+            if (_webView != null)
+            {
+                Controls.Remove(_webView);
+                _webView.Dispose();
+                _webView = null;
+            }
+        }
+        catch { }
 
         base.OnFormClosing(e);
     }

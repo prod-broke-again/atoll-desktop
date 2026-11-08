@@ -55,6 +55,7 @@ public sealed class CollageEngineService : BackgroundService, ICollageEngineServ
                 _rotationTimer?.Dispose();
                 _rotationTimer = null;
                 CurrentCollage = null;
+                // WallpaperForm also listens to ConfigChanged and pushes collage_clear to the web.
                 return;
             }
             ResetTimer();

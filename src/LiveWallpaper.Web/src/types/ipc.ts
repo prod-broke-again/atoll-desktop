@@ -31,6 +31,7 @@ export interface ConfigMessage {
   type: 'config';
   config: {
     collage: {
+      enabled?: boolean;
       intervalMinutes: number;
       style: string;
       shuffleStyle?: boolean;
@@ -114,6 +115,10 @@ export interface CollageMessage {
   style: string;
   items: CollageImageItem[];
   palette: string[];
+}
+
+export interface CollageClearMessage {
+  type: 'collage_clear';
 }
 
 export interface PauseMessage {
@@ -313,6 +318,7 @@ export type HostToWebMessage =
   | WeatherMessage
   | MediaMessage
   | CollageMessage
+  | CollageClearMessage
   | PauseMessage
   | LauncherMessage
   | ServerStateMessage

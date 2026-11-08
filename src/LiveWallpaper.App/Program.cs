@@ -92,7 +92,20 @@ public static class Program
             _ = services.GetRequiredService<TrayManager>();
 
             Application.Run(appContext);
-            host.StopAsync().GetAwaiter().GetResult();
+            // Cap host teardown: SSH/TaskbarSpike/plugin StopAsync can otherwise block the
+            // process (and a leftover LL hook) long after the wallpaper UI is gone.
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                if (!host.StopAsync(cts.Token).Wait(TimeSpan.FromSeconds(10)))
+                {
+                    Log.Warning("Host StopAsync timed out after 10s; continuing exit.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Host StopAsync failed during shutdown.");
+            }
         }
         catch (Exception ex)
         {
