@@ -158,33 +158,33 @@ public sealed class AutoPauseService : BackgroundService, IAutoPauseService
         }
     }
 
-    private static bool CheckBlockedProcesses(System.Collections.Generic.List<string> blockedList)
+    private long _blockedCheckedAt;
+    private bool _blockedLast;
+
+    private bool CheckBlockedProcesses(System.Collections.Generic.List<string> blockedList)
     {
+        // Enumerating processes is expensive; re-check at most every 4 s.
+        var now = Environment.TickCount64;
+        if (now - _blockedCheckedAt < 4000) return _blockedLast;
+        _blockedCheckedAt = now;
+
+        var found = false;
         try
         {
-            var running = Process.GetProcesses();
-            foreach (var p in running)
+            foreach (var entry in blockedList)
             {
-                try
-                {
-                    var name = p.ProcessName;
-                    if (blockedList.Any(b =>
-                        b.Equals(name, StringComparison.OrdinalIgnoreCase) ||
-                        b.Equals(name + ".exe", StringComparison.OrdinalIgnoreCase)))
-                    {
-                        return true;
-                    }
-                }
-                catch { }
-                finally
-                {
-                    p.Dispose();
-                }
+                var name = entry.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? entry[..^4] : entry;
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var matches = Process.GetProcessesByName(name);
+                var any = matches.Length > 0;
+                foreach (var m in matches) m.Dispose();
+                if (any) { found = true; break; }
             }
         }
         catch { }
 
-        return false;
+        _blockedLast = found;
+        return found;
     }
 
     private void UpdateState(bool shouldPause, string reason)
