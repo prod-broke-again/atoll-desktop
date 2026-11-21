@@ -453,6 +453,9 @@ const mockCollageImages = [
   { id: 'img12', url: 'https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?auto=format&fit=crop&w=1200&q=80', width: 1200, height: 800, dominantColor: '#18181b' },
 ];
 
+let mockRecycleCount = 3;
+let mockRecycleBytes = 48_320_512;
+
 if (!window.chrome?.webview) {
   const chromeObj = (window.chrome = window.chrome || ({} as unknown as Window['chrome']));
   chromeObj!.webview = {
@@ -461,7 +464,23 @@ if (!window.chrome?.webview) {
     },
     postMessage(msg: unknown): void {
       console.log('[DevMock IPC Web->Host]', msg);
-      const obj = msg as { type?: string; id?: string };
+      const obj = msg as { type?: string; id?: string; requestId?: string; message?: string };
+
+      if (obj?.type === 'confirm' && obj.requestId) {
+        const confirmed = window.confirm(obj.message || '');
+        emit({ type: 'confirm_result', requestId: obj.requestId, confirmed });
+        return;
+      }
+      if (obj?.type === 'empty_recycle') {
+        mockRecycleCount = 0;
+        mockRecycleBytes = 0;
+        emit({ type: 'recycle', count: 0, bytes: 0 });
+        return;
+      }
+      if (obj?.type === 'recycle_refresh') {
+        emit({ type: 'recycle', count: mockRecycleCount, bytes: mockRecycleBytes });
+        return;
+      }
 
       if (obj?.type === 'ready') {
         setTimeout(() => {
@@ -521,6 +540,7 @@ if (!window.chrome?.webview) {
             pinned: mockPinned,
             groups: buildMockGroups(isEn),
           });
+          emit({ type: 'recycle', count: mockRecycleCount, bytes: mockRecycleBytes });
 
           // 5. Server State (default healthy)
           emit(buildMockState('good', isEn));
@@ -652,6 +672,11 @@ if (!window.chrome?.webview) {
     togglePrivacyMode: () => {
       currentPrivacyMode = !currentPrivacyMode;
       emit({ type: 'privacy_mode', enabled: currentPrivacyMode });
+    },
+    setRecycle: (count: number, bytes: number) => {
+      mockRecycleCount = count;
+      mockRecycleBytes = bytes;
+      emit({ type: 'recycle', count, bytes });
     },
     openFirstFolder: () => {
       const tile = document.querySelector('.folder-tile-widget') as HTMLElement;

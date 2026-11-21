@@ -132,6 +132,7 @@ export class FolderWidget implements IWidget {
 
   public openPanel(): void {
     if (!this.element || !this.overlayContainer) return;
+    window.dispatchEvent(new Event('lw-close-recycle-card'));
 
     // Only one panel can be open at a time
     if (FolderWidget.activeOpenFolder && FolderWidget.activeOpenFolder !== this) {

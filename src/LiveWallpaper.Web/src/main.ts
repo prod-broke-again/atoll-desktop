@@ -237,6 +237,10 @@ class LiveWallpaperApp {
         this.launcherManager.update(message);
         break;
 
+      case 'recycle':
+        this.launcherManager.setRecycle(message);
+        break;
+
       case 'serverState':
         this.serverWidget.update(message);
         break;
@@ -429,7 +433,7 @@ class LiveWallpaperApp {
     toggle('.system-widget', widgets.showSystem);
     toggle('.srv', widgets.showServer);
     toggle('.media-widget', widgets.showMedia);
-    toggle('.dock-widget, .folder-tile', widgets.showLauncher);
+    toggle('.dock-widget, .folder-tile, .recycle-bin-widget, .recycle-card', widgets.showLauncher);
     toggle('.tg', widgets.showTelegram !== false);
     toggle('.agenda-widget', widgets.showToday !== false);
     this.agendaWidget.setAgendaEnabled(widgets.showToday !== false);

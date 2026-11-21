@@ -1,12 +1,14 @@
 import type { IWidget } from './contract';
-import type { LauncherMessage, LauncherGroup } from '../types/ipc';
+import type { LauncherMessage, LauncherGroup, RecycleMessage } from '../types/ipc';
 import { FolderWidget } from './folder';
 import { DockWidget } from './dock';
+import { RecycleBinWidget } from './recycle-bin';
 
 export class LauncherWidgetManager implements IWidget {
   readonly id = 'launcher-manager';
   private container: HTMLElement | null = null;
   private dockWidget: DockWidget | null = null;
+  private recycleBin: RecycleBinWidget | null = null;
   private folderWidgets = new Map<string, FolderWidget>();
 
   mount(container: HTMLElement): void {
@@ -18,6 +20,13 @@ export class LauncherWidgetManager implements IWidget {
       y: 280,
     }));
     this.dockWidget.mount(container);
+
+    this.recycleBin = new RecycleBinWidget();
+    this.recycleBin.mount(container);
+  }
+
+  setRecycle(data: RecycleMessage): void {
+    this.recycleBin?.update(data);
   }
 
   update(data: unknown): void {
@@ -61,6 +70,7 @@ export class LauncherWidgetManager implements IWidget {
 
   pause(): void {
     FolderWidget.closeActive();
+    this.recycleBin?.pause();
     this.dockWidget?.pause();
     for (const w of this.folderWidgets.values()) {
       w.pause();
@@ -69,6 +79,7 @@ export class LauncherWidgetManager implements IWidget {
 
   resume(): void {
     this.dockWidget?.resume();
+    this.recycleBin?.resume();
     for (const w of this.folderWidgets.values()) {
       w.resume();
     }
@@ -78,6 +89,8 @@ export class LauncherWidgetManager implements IWidget {
     FolderWidget.closeActive();
     this.dockWidget?.destroy();
     this.dockWidget = null;
+    this.recycleBin?.destroy();
+    this.recycleBin = null;
     for (const w of this.folderWidgets.values()) {
       w.destroy();
     }

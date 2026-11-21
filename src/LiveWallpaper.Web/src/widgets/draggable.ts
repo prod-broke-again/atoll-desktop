@@ -35,7 +35,7 @@ const SNAP = 6; // snap threshold, px — small on purpose so it never feels sti
 const PAD = 8; // minimum free space kept between widgets when resolving overlaps
 
 const HOVERABLE =
-  '.launcher-item, .dock-item, .folder-tile, .w-btn-action, .m-btn, .srv-site, button.srv-meter, .srv-icon-btn, .media-progress-bar, .m-pill-btn, .agenda-widget [data-action], .tg-row, .lcm-row, .lcm-quick-btn';
+  '.launcher-item, .dock-item, .folder-tile, .recycle-tile, .recycle-row, .w-btn-action, .m-btn, .srv-site, button.srv-meter, .srv-icon-btn, .media-progress-bar, .m-pill-btn, .agenda-widget [data-action], .tg-row, .lcm-row, .lcm-quick-btn';
 
 type WheelListener = (x: number, y: number, delta: number, target: Element | null) => boolean;
 
@@ -52,6 +52,7 @@ export class DraggableWidgetManager {
   private static pressed: { x: number; y: number; id: string } | null = null;
   private static resizeBound = false;
   private static clickListeners: ((x: number, y: number, target: Element | null) => void)[] = [];
+  private static contextMenuHandlers: ((x: number, y: number, hit: Element | null) => boolean)[] = [];
   private static wheelListeners: WheelListener[] = [];
   private static dragEndListeners: ((id: string) => void)[] = [];
   /** Expanded widgets (e.g. the clock panel) float above neighbours: no overlap resolution either way. */
@@ -116,6 +117,16 @@ export class DraggableWidgetManager {
 
   public static unregister(id: string): void {
     this.registered.delete(id);
+  }
+
+  public static addContextMenuHandler(
+    listener: (x: number, y: number, hit: Element | null) => boolean,
+  ): () => void {
+    this.contextMenuHandlers.push(listener);
+    return () => {
+      const idx = this.contextMenuHandlers.indexOf(listener);
+      if (idx >= 0) this.contextMenuHandlers.splice(idx, 1);
+    };
   }
 
   public static addGlobalClickListener(listener: (x: number, y: number, target: Element | null) => void): () => void {
@@ -269,6 +280,12 @@ export class DraggableWidgetManager {
 
     // RMB on an open menu (or its chrome) — ignore; left-click path handles items.
     if (hit instanceof Element && hit.closest('.launcher-context-menu')) return;
+
+    for (const handler of this.contextMenuHandlers) {
+      try {
+        if (handler(x, y, hit instanceof Element ? hit : null)) return;
+      } catch { /* listener errors must not break input */ }
+    }
 
     const target = hit instanceof Element ? hit.closest<HTMLElement>(HOVERABLE) : null;
     // Menu rows are hoverable but must not open a nested item menu.

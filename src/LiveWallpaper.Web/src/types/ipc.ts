@@ -163,6 +163,12 @@ export interface LauncherMessage {
   groups: LauncherGroup[];
 }
 
+export interface RecycleMessage {
+  type: 'recycle';
+  count: number;
+  bytes: number;
+}
+
 export interface MetricPoint {
   t: number;
   cpu: number;
@@ -321,6 +327,7 @@ export type HostToWebMessage =
   | CollageClearMessage
   | PauseMessage
   | LauncherMessage
+  | RecycleMessage
   | ServerStateMessage
   | ServerMetricsMessage
   | PrivacyModeMessage

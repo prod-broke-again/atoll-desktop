@@ -73,6 +73,11 @@ public sealed class WallpaperForm : Form
     // Hotplug storms need longer coalesce than theme tweaks — 1.2s lets WorkerW settle.
     private readonly System.Windows.Forms.Timer _displayChangeDebounceTimer = new() { Interval = 1200 };
     private readonly System.Windows.Forms.Timer _desktopParentDebounceTimer = new() { Interval = 400 };
+    private readonly System.Windows.Forms.Timer _recycleTimer = new() { Interval = 3000 };
+    private long _recycleCount = -1;
+    private long _recycleBytes = -1;
+    private bool _emptyingRecycle;
+    private bool _recycleQueryFailed;
     private static readonly Color HostBackdrop = Color.FromArgb(7, 8, 13);
 
     public WallpaperForm(
@@ -592,6 +597,8 @@ public sealed class WallpaperForm : Form
                                 SendLauncherSnapshot(_launcherService.CurrentSnapshot);
                             }
 
+                            EnsureRecycleWatch();
+
                             if (_configManager.CurrentConfig.Server.Enabled)
                             {
                                 var initialServerSnapshot = _serverService.CurrentSnapshot with
@@ -730,6 +737,37 @@ public sealed class WallpaperForm : Form
                             {
                                 _launcherService.DeleteItem(itemId);
                             }
+                        }
+                        else if (type == "empty_recycle")
+                        {
+                            if (!_emptyingRecycle)
+                            {
+                                _emptyingRecycle = true;
+                                try
+                                {
+                                    BeginInvoke(EmptyRecycleFromWeb);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _emptyingRecycle = false;
+                                    _logger.LogWarning(ex, "Failed to schedule recycle bin empty.");
+                                }
+                            }
+                        }
+                        else if (type == "open_recycle")
+                        {
+                            try
+                            {
+                                RecycleBin.Open();
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to open the recycle bin.");
+                            }
+                        }
+                        else if (type == "recycle_refresh")
+                        {
+                            PublishRecycle(force: true);
                         }
                         else if (type == "launcher_action")
                         {
@@ -1413,6 +1451,54 @@ public sealed class WallpaperForm : Form
         return cls is "Progman" or "WorkerW";
     }
 
+    private void EnsureRecycleWatch()
+    {
+        PublishRecycle(force: true);
+        if (_recycleTimer.Enabled) return;
+        _recycleTimer.Tick += (_, _) => PublishRecycle(force: false);
+        _recycleTimer.Start();
+    }
+
+    private void PublishRecycle(bool force)
+    {
+        if (_emptyingRecycle && !force) return;
+
+        if (!RecycleBin.TryQuery(out var info))
+        {
+            if (!_recycleQueryFailed)
+            {
+                _recycleQueryFailed = true;
+                _logger.LogWarning("Recycle bin query failed.");
+            }
+            return;
+        }
+
+        _recycleQueryFailed = false;
+        if (!force && info.Count == _recycleCount && info.Bytes == _recycleBytes) return;
+        _recycleCount = info.Count;
+        _recycleBytes = info.Bytes;
+        SendWebMessage(new { type = "recycle", count = info.Count, bytes = info.Bytes });
+    }
+
+    private void EmptyRecycleFromWeb()
+    {
+        try
+        {
+            var hr = RecycleBin.Empty();
+            if (!RecycleBin.IsEmptyResult(hr))
+                _logger.LogWarning("SHEmptyRecycleBin failed: 0x{Hr:X8}", hr);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to empty the recycle bin.");
+        }
+        finally
+        {
+            _emptyingRecycle = false;
+            PublishRecycle(force: true);
+        }
+    }
+
     public void SendWebMessage(object payload)
     {
         if (IsDisposed || !IsHandleCreated) return;
@@ -1662,6 +1748,8 @@ public sealed class WallpaperForm : Form
         _displayChangeDebounceTimer.Dispose();
         _desktopParentDebounceTimer.Stop();
         _desktopParentDebounceTimer.Dispose();
+        _recycleTimer.Stop();
+        _recycleTimer.Dispose();
 
         // Unhook first: a stuck LL mouse hook freezes input for the whole desktop during teardown.
         try { _mouseHook.MouseMoved -= OnMouseMoved; } catch { }
