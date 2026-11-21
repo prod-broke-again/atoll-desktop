@@ -28,8 +28,7 @@ public static class Program
         try { Directory.CreateDirectory(logFolder); } catch { }
 
         Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Debug()
-            .WriteTo.Console()
+            .MinimumLevel.Information()
             .WriteTo.File(
                 Path.Combine(logFolder, "app-.log"),
                 rollingInterval: RollingInterval.Day,

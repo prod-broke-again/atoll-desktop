@@ -29,7 +29,12 @@ public sealed class TaskbarPanelService : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        WallpaperUpdate.EnsureShortcut();
+        // COM/disk work off the startup path.
+        Task.Run(() =>
+        {
+            try { WallpaperUpdate.EnsureShortcut(); }
+            catch (Exception ex) { _logger.LogDebug(ex, "EnsureShortcut failed"); }
+        }, CancellationToken.None);
         Apply(false);
         return Task.CompletedTask;
     }

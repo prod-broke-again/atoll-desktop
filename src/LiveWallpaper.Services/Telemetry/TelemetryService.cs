@@ -58,11 +58,6 @@ public sealed class TelemetryService : BackgroundService, ITelemetryService
 
         StartTimer();
 
-        _configManager.ConfigChanged += (s, cfg) =>
-        {
-            StartTimer();
-        };
-
         return Task.CompletedTask;
     }
 
@@ -98,7 +93,8 @@ public sealed class TelemetryService : BackgroundService, ITelemetryService
 
     private void PollMetrics()
     {
-        if (_isPaused) return;
+        // Only the system widget consumes telemetry; skip GPU/PDH sampling when it is off.
+        if (_isPaused || !_configManager.CurrentConfig.Widgets.ShowSystemMetrics) return;
 
         try
         {

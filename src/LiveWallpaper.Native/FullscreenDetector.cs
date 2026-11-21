@@ -62,15 +62,13 @@ public static class FullscreenDetector
     {
         LastReason = string.Empty;
         var fgHwnd = GetForegroundWindow();
-        var fgInfo = Describe(fgHwnd);
-
         // 1. Exclusive full-screen (DirectX/Vulkan) and presentation mode are always trusted.
         if (SHQueryUserNotificationState(out var state) == 0)
         {
             if (state == QueryUserNotificationState.RunningD3dFullScreen ||
                 state == QueryUserNotificationState.PresentationMode)
             {
-                LastReason = $"{state}; foreground: {fgInfo}";
+                LastReason = $"{state}; foreground: {Describe(fgHwnd)}";
                 return true;
             }
         }
@@ -119,7 +117,7 @@ public static class FullscreenDetector
                 bounds.Right >= screen.Bounds.Right &&
                 bounds.Bottom >= screen.Bounds.Bottom)
             {
-                LastReason = $"borderless fullscreen; foreground: {fgInfo}";
+                LastReason = $"borderless fullscreen; foreground: {Describe(fgHwnd)}";
                 return true;
             }
         }
