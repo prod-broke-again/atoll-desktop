@@ -200,6 +200,11 @@ public sealed class WallpaperBackgroundConfig
     /// When off (or playlist empty), the web layer shows the current Windows desktop wallpaper.
     /// </summary>
     public bool Enabled { get; set; } = true;
+    /// <summary>
+    /// When the custom playlist is off/empty: show the Windows desktop wallpaper (true) or keep
+    /// the built-in animated background (stars/aurora) visible (false).
+    /// </summary>
+    public bool ShowSystemWallpaper { get; set; } = true;
     /// <summary>Legacy single YouTube URL (migrated into <see cref="Sources"/> when non-empty).</summary>
     public string YoutubeUrl { get; set; } = string.Empty;
     /// <summary>Off by default so a live wallpaper does not blast audio after login.</summary>

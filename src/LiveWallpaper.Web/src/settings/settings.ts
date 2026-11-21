@@ -57,6 +57,7 @@ interface Settings {
   taskbar: { enabled: boolean };
   wallpaper: {
     enabled: boolean;
+    showSystemWallpaper: boolean;
     youtubeUrl: string;
     soundEnabled: boolean;
     rotationSeconds: number;
@@ -246,8 +247,9 @@ class SettingsApp {
   }
 
   private normalize(): void {
-    if (!this.s.wallpaper) this.s.wallpaper = { enabled: true, youtubeUrl: '', soundEnabled: false, rotationSeconds: 300, shuffle: false, sources: [] };
+    if (!this.s.wallpaper) this.s.wallpaper = { enabled: true, showSystemWallpaper: true, youtubeUrl: '', soundEnabled: false, rotationSeconds: 300, shuffle: false, sources: [] };
     if (this.s.wallpaper.enabled == null) this.s.wallpaper.enabled = true;
+    if (this.s.wallpaper.showSystemWallpaper == null) this.s.wallpaper.showSystemWallpaper = true;
     if (!this.s.wallpaper.sources) this.s.wallpaper.sources = [];
     if (this.s.collage.enabled == null) this.s.collage.enabled = false;
     if (!this.s.plugins) this.s.plugins = [];
@@ -379,7 +381,7 @@ class SettingsApp {
       'Обои',
       'Свой плейлист фото/видео/YouTube. Выключено — фон как у Windows.',
       `
-      <div class="card">${this.row('Свои обои', 'Выключено — текущие обои Windows 11', this.toggle('wpEnabled', w.enabled !== false))}</div>
+      <div class="card">${this.row('Свои обои', 'Выключено — обои Windows или встроенный фон (см. ниже)', this.toggle('wpEnabled', w.enabled !== false))}${this.row('Обои Windows', 'Когда свои обои выключены: показывать обои рабочего стола. Выключите, чтобы остался анимированный фон со звёздами', this.toggle('wpSystem', w.showSystemWallpaper !== false))}</div>
       <div class="wp-body${gated}">
       <div class="wp-stage" id="wpStage"></div>
       <div class="wp-toolbar">
@@ -744,6 +746,7 @@ class SettingsApp {
       this.bind();
       this.updateDirty();
     });
+    on('wpSystem', (v) => (s.wallpaper.showSystemWallpaper = v));
     on('wpShuffle', (v) => (s.wallpaper.shuffle = v));
     on('wpSound', (v) => (s.wallpaper.soundEnabled = v));
     const rot = this.q('#wpRotation') as HTMLInputElement;
@@ -1008,7 +1011,7 @@ const DEMO: Settings = {
   atmosphere: { enabled: true, enableProdAlert: true, enableUpcomingCall: true, enableLowBalanceBeacon: true },
   setupPalette: { enabled: true, syncWindowsAccent: true, syncWindowsTerminal: true, syncRedragonHid: true, syncOpenRgb: false, syncRazerChroma: false, currentAccentHex: '#6366F1', keyboardIntensity: 0.85, nightKeyboardIntensity: 0.4 },
   taskbar: { enabled: false },
-  wallpaper: { enabled: true, youtubeUrl: '', soundEnabled: false, rotationSeconds: 300, shuffle: false, sources: [] },
+  wallpaper: { enabled: true, showSystemWallpaper: true, youtubeUrl: '', soundEnabled: false, rotationSeconds: 300, shuffle: false, sources: [] },
   plugins: [
     { pluginId: 'telegram', displayName: 'Telegram', description: '', fields: [{ id: 'enabled', label: 'Включить', kind: 'toggle', value: true }] },
   ],

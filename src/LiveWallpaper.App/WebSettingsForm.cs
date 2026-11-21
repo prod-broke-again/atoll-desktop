@@ -381,6 +381,7 @@ public sealed class WebSettingsForm : Form
                 wallpaper = new
                 {
                     enabled = c.Wallpaper?.Enabled != false,
+                    showSystemWallpaper = c.Wallpaper?.ShowSystemWallpaper != false,
                     youtubeUrl = c.Wallpaper?.YoutubeUrl ?? "",
                     soundEnabled = c.Wallpaper?.SoundEnabled == true,
                     rotationSeconds = c.Wallpaper?.RotationSeconds ?? 300,
@@ -498,6 +499,8 @@ public sealed class WebSettingsForm : Form
         {
             if (wallpaperProp.TryGetProperty("enabled", out var wpEn))
                 cfg.Wallpaper.Enabled = wpEn.GetBoolean();
+            if (wallpaperProp.TryGetProperty("showSystemWallpaper", out var wpSys))
+                cfg.Wallpaper.ShowSystemWallpaper = wpSys.GetBoolean();
             if (wallpaperProp.TryGetProperty("soundEnabled", out var ytSound))
                 cfg.Wallpaper.SoundEnabled = ytSound.GetBoolean();
             if (wallpaperProp.TryGetProperty("rotationSeconds", out var rot) && rot.TryGetInt32(out var rotVal))

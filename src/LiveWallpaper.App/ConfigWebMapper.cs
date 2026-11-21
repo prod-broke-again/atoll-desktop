@@ -38,7 +38,9 @@ internal static class ConfigWebMapper
             }
 
             // Windows desktop wallpaper as fallback when custom playlist is off / empty.
-            var systemPath = WindowsDesktopWallpaper.TryGetPath();
+            var systemPath = config.Wallpaper?.ShowSystemWallpaper == false
+                ? null
+                : WindowsDesktopWallpaper.TryGetPath();
             if (!string.IsNullOrWhiteSpace(systemPath) && File.Exists(systemPath))
             {
                 var sysUrl = mediaHost.TryGetMediaUrl(systemPath);
