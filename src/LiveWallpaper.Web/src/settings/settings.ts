@@ -530,7 +530,6 @@ class SettingsApp {
         ${this.row('Пауза в играх', 'При полноэкранных приложениях', this.toggle('pauseFs', s.performance.autoPauseFullscreen))}
         ${this.row('Пауза от батареи', '', this.toggle('pauseBat', s.performance.autoPauseBattery))}
         ${this.row('FPS в простое', '', `<div class="seg" id="fps">${[30, 45, 60].map((v) => `<button type="button" data-fps="${v}" class="${s.performance.fpsIdle === v ? 'active' : ''}">${v}</button>`).join('')}</div>`)}
-        ${this.row('Своя панель задач (Бета)', 'Экспериментальная замена панели Windows', this.toggle('taskbar', s.taskbar?.enabled ?? false))}
         ${this.row('Автозапуск', 'Вместе с Windows', this.toggle('autostart', s.autostart))}
         <div class="row">
           <div class="row-text"><div class="row-title">Обновление</div><div class="row-sub">Пересобрать обои и перезапустить</div></div>

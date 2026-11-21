@@ -23,13 +23,14 @@ public sealed class TaskbarPanelService : IHostedService
     {
         _config = config;
         _logger = logger;
-        _config.ConfigChanged += (_, cfg) => Apply(cfg.Taskbar?.Enabled == true);
+        // Custom taskbar panel is disabled: never started, config is ignored.
+        // Any leftover TaskbarSpike process is closed so the Windows taskbar comes back.
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
         WallpaperUpdate.EnsureShortcut();
-        Apply(_config.CurrentConfig.Taskbar?.Enabled == true);
+        Apply(false);
         return Task.CompletedTask;
     }
 
