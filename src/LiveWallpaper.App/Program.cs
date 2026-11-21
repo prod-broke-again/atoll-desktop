@@ -166,13 +166,13 @@ public static class Program
                 services.AddHostedService(sp => sp.GetRequiredService<Services.Launcher.LauncherService>());
 
                 services.AddSingleton<Services.Server.ISshStreamService, Services.Server.SshStreamService>();
-                services.AddHostedService(sp => (Services.Server.SshStreamService)sp.GetRequiredService<Services.Server.ISshStreamService>());
+                services.AddHostedService(sp => new DeferredHostedService((Services.Server.SshStreamService)sp.GetRequiredService<Services.Server.ISshStreamService>(), TimeSpan.FromSeconds(9), sp.GetRequiredService<ILogger<DeferredHostedService>>()));
 
                 services.AddSingleton<Services.Server.ITimewebClient, Services.Server.TimewebClient>();
                 services.AddSingleton<Services.Server.ISiteHealthService, Services.Server.SiteHealthService>();
 
                 services.AddSingleton<Services.Server.IServerWidgetService, Services.Server.ServerWidgetService>();
-                services.AddHostedService(sp => (Services.Server.ServerWidgetService)sp.GetRequiredService<Services.Server.IServerWidgetService>());
+                services.AddHostedService(sp => new DeferredHostedService((Services.Server.ServerWidgetService)sp.GetRequiredService<Services.Server.IServerWidgetService>(), TimeSpan.FromSeconds(8), sp.GetRequiredService<ILogger<DeferredHostedService>>()));
 
                 services.AddSingleton<Services.Context.ContextService>();
                 services.AddSingleton<Services.Context.IContextService>(sp => sp.GetRequiredService<Services.Context.ContextService>());
@@ -180,11 +180,11 @@ public static class Program
 
                 services.AddSingleton<Services.Today.TodayService>();
                 services.AddSingleton<Services.Today.ITodayService>(sp => sp.GetRequiredService<Services.Today.TodayService>());
-                services.AddHostedService(sp => sp.GetRequiredService<Services.Today.TodayService>());
+                services.AddHostedService(sp => new DeferredHostedService(sp.GetRequiredService<Services.Today.TodayService>(), TimeSpan.FromSeconds(8), sp.GetRequiredService<ILogger<DeferredHostedService>>()));
 
                 services.AddSingleton<Services.Telegram.TelegramUnreadService>();
                 services.AddSingleton<Services.Telegram.ITelegramUnreadService>(sp => sp.GetRequiredService<Services.Telegram.TelegramUnreadService>());
-                services.AddHostedService(sp => sp.GetRequiredService<Services.Telegram.TelegramUnreadService>());
+                services.AddHostedService(sp => new DeferredHostedService(sp.GetRequiredService<Services.Telegram.TelegramUnreadService>(), TimeSpan.FromSeconds(10), sp.GetRequiredService<ILogger<DeferredHostedService>>()));
 
                 // Widget plugins: contracts in LiveWallpaper.Core.Plugins, implementations in
                 // LiveWallpaper.Services.Plugins. The host starts after the services the
