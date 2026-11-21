@@ -64,6 +64,8 @@ public sealed class LauncherService : BackgroundService, ILauncherService
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("LauncherService started. Initial desktop scan...");
+        var lc = _configManager.CurrentConfig.Launcher;
+        _lastScanSignature = lc.Enabled + "|" + string.Join("", lc.ExcludedFolders);
         Refresh();
         SetupWatchers();
 
@@ -71,8 +73,14 @@ public sealed class LauncherService : BackgroundService, ILauncherService
         return Task.CompletedTask;
     }
 
+    private string? _lastScanSignature;
+
     private void OnConfigChanged(object? sender, AppConfig config)
     {
+        // Only Enabled/ExcludedFolders affect the scan; skip rescans for unrelated saves.
+        var signature = config.Launcher.Enabled + "|" + string.Join("", config.Launcher.ExcludedFolders);
+        if (signature == _lastScanSignature) return;
+        _lastScanSignature = signature;
         Refresh();
     }
 

@@ -41,8 +41,13 @@ public sealed class PinsIndexerService : BackgroundService
         RefreshIndex();
         SetupWatcher();
 
+        var lastDir = _configManager.CurrentConfig.Collage.PinsDirectory;
         _configManager.ConfigChanged += (s, cfg) =>
         {
+            // Config is saved on every drag/toggle; only a changed pins folder needs a re-index.
+            var dir = cfg.Collage.PinsDirectory;
+            if (string.Equals(dir, lastDir, StringComparison.OrdinalIgnoreCase)) return;
+            lastDir = dir;
             SetupWatcher();
             RefreshIndex();
         };
